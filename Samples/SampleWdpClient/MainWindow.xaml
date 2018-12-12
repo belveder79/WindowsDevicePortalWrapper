@@ -33,5 +33,11 @@
         <ScrollViewer Grid.Column="1" Margin="10,42,10,10">
             <TextBox x:Name="commandOutput" Margin="0,0,0,0" TextWrapping="Wrap" Text=""/>
         </ScrollViewer>
+        <Button x:Name="UploadFile" Content="Upload File" Grid.Column="0" HorizontalAlignment="Left" Margin="288,405,0,0" VerticalAlignment="Top" Width="93" Click="UploadFile_Click" IsEnabled="False" Height="32"/>
+        <Button x:Name="DeleteFile" Content="Delete File" Grid.Column="0" HorizontalAlignment="Left" Margin="288,479,0,0" VerticalAlignment="Top" Width="93" Click="DeleteFile_Click" IsEnabled="False" Height="32"/>
+        <ListBox Name="FileList" HorizontalAlignment="Left" Height="245" Margin="12,266,0,0" VerticalAlignment="Top" Width="271" MouseDoubleClick="FileList_MouseDoubleClick"/>
+        <Button x:Name="DownloadFile" Content="Download File" Grid.Column="0" HorizontalAlignment="Left" Margin="288,442,0,0" VerticalAlignment="Top" Width="93" Click="DownloadFile_Click" IsEnabled="False" Height="32"/>
+        <ComboBox x:Name="PackageSelector" HorizontalAlignment="Left" Margin="12,234,0,0" VerticalAlignment="Top" Width="271" Height="27" IsEnabled="False" SelectionChanged="PackageSelector_SelectionChanged"/>
+        <Border Grid.Column="0" BorderBrush="Black" BorderThickness="1" Height="1" Margin="15,220,14.667,0" VerticalAlignment="Top"/>
     </Grid>
 </Window>

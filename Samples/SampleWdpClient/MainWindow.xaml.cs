@@ -9,6 +9,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Documents;
+using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
@@ -74,14 +75,27 @@ namespace SampleWdpClient
         {
             this.EnableConnectionControls(false);
             this.EnableDeviceControls(false);
-
+            
             this.ClearOutput();
 
-            portal = new DevicePortal(
-                new DefaultDevicePortalConnection(
-                    this.address.Text,
-                    this.username.Text,
-                    this.password.Password));
+            this.EnableFileOperation(false);
+
+            try
+            {
+                portal = new DevicePortal(
+                    new DefaultDevicePortalConnection(
+                        this.address.Text,
+                        this.username.Text,
+                        this.password.Password));
+            }
+            catch( Exception ex )
+            {
+                this.MarshalUpdateCommandOutput("Caught exception: " + ex.ToString());
+
+                this.EnableConnectionControls(true);
+                this.EnableDeviceControls(true);
+                return;
+            }
 
             // Add additional handling for untrusted certs.
             portal.UnvalidatedCert += DoCertValidation;
@@ -107,6 +121,8 @@ namespace SampleWdpClient
                                 sb.AppendLine(String.Format("{0} ({1})",
                                     portal.PlatformName,
                                     portal.Platform.ToString()));
+
+                                this.MarshalEnableFileOperation(true);
                             }
                             else if (connectArgs.Status == DeviceConnectionStatus.Failed)
                             { 
@@ -377,6 +393,8 @@ namespace SampleWdpClient
             this.EnableConnectionControls(false);
             this.EnableDeviceControls(false);
 
+            this.EnableFileOperation(false);
+
             StringBuilder sb = new StringBuilder();
             Task rebootTask = new Task(
                 async () =>
@@ -421,6 +439,8 @@ namespace SampleWdpClient
             this.ClearOutput();
             this.EnableConnectionControls(false);
             this.EnableDeviceControls(false);
+
+            this.EnableFileOperation(false);
 
             StringBuilder sb = new StringBuilder();
             Task shutdownTask = new Task(
@@ -484,7 +504,7 @@ namespace SampleWdpClient
 
             // We could alternatively ask the user if they wanted to always trust
             // this device and we could persist the thumbprint in some way (registry, database, filesystem, etc).
-            MessageBoxResult result = MessageBox.Show(string.Format(
+            MessageBoxResult result = System.Windows.MessageBox.Show(string.Format(
                                 "Do you want to accept the following certificate?\n\nThumbprint:\n  {0}\nIssuer:\n  {1}", 
                                 cert.Thumbprint,
                                 cert.Issuer),
@@ -499,6 +519,254 @@ namespace SampleWdpClient
                 return true;
             }
             return false;
+        }
+
+        //===========================================================================================================
+
+        private string CurrentPackageFullName = null;
+        private string currentFolderName = null;
+        private FolderContents currentFolderContents = null;
+        private AppPackages currentAppPackages = null;
+
+        private void MarshalEnableFileOperation(bool enable)
+        {
+            this.Dispatcher.Invoke(
+            () =>
+            {
+                EnableFileOperation(enable);
+            },
+            DispatcherPriority.Normal);
+        }
+
+        private void EnableFileOperation(bool enable)
+        {
+            if (enable)
+            {
+                this.FetchPackageNames();
+                this.EnablePackageSelectorControls(true);
+            }
+            else
+            {
+                this.ResetInternals();
+                this.EnablePackageSelectorControls(false);
+                this.EnableFileExplorerControls(false);
+            }
+        }
+
+        private void ResetInternals()
+        {
+            this.CurrentPackageFullName = null;
+            this.currentFolderName = null;
+            this.currentFolderContents = null;
+            this.currentAppPackages = null;
+            this.PackageSelector.Items.Clear();
+            this.FileList.Items.Clear();
+        }
+
+        private void EnablePackageSelectorControls(bool enable)
+        {
+            this.PackageSelector.IsEnabled = enable;
+            this.PackageSelector.SelectedItem = 0;
+        }
+
+        private void EnableFileExplorerControls(bool enable)
+        {
+            this.UploadFile.IsEnabled = enable;
+            this.DeleteFile.IsEnabled = enable;
+            this.DownloadFile.IsEnabled = enable;
+        }
+
+        async private void FetchPackageNames()
+        {
+            this.PackageSelector.Items.Clear();
+            this.currentAppPackages = await this.portal.GetInstalledAppPackagesAsync();
+            for (int i = 0; i < this.currentAppPackages.Packages.Count; i++)
+            {
+                this.PackageSelector.Items.Add(this.currentAppPackages.Packages.ElementAt(i).Name);
+            }
+        }
+
+        private void PackageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (this.PackageSelector.SelectedIndex < 0)
+                return;
+
+            PackageInfo f = this.currentAppPackages.Packages.Find(y => y.Name == this.PackageSelector.SelectedItem.ToString());
+            if (f != null)
+            {
+                this.CurrentPackageFullName = f.FullName;
+                this.currentFolderContents = null;
+                this.FillListFiles();
+            }
+            else
+            {
+                this.CurrentPackageFullName = null;
+                this.currentFolderContents = null;
+                this.FileList.Items.Clear();
+            }
+        }
+
+        private async void FillListFiles()
+        {
+            this.FileList.Items.Clear();
+            try
+            {
+                this.currentFolderContents = await this.portal.GetFolderContentsAsync("LocalAppData", this.currentFolderName, this.CurrentPackageFullName);
+                this.FileList.Items.Add("..");
+                for (int i = 0; i < this.currentFolderContents.Contents.Count; i++)
+                {
+                    this.FileList.Items.Add(this.currentFolderContents.Contents.ElementAt(i).Name);
+                }
+                this.EnableFileExplorerControls(true);
+
+            }
+            catch(Exception e)
+            {
+                this.MarshalUpdateCommandOutput("Caught exception: " + e.ToString());
+                this.EnableFileExplorerControls(false);
+            }
+        }
+
+        private void FileList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+        {
+            
+            if (this.FileList.SelectedIndex < 0)
+                return;
+
+            string itemName = this.FileList.SelectedItem.ToString();
+            if (itemName == "..")
+            {
+                if (currentFolderName == null)
+                {
+                    // don't do anything
+                }
+                else
+                {
+                    int i = this.currentFolderName.LastIndexOf('/');
+                    if (i < 0)
+                    {
+                        this.currentFolderName = null;
+                    }
+                    else
+                    {
+                        this.currentFolderName = currentFolderName.Substring(0, i-1);
+                        // Console.WriteLine(currentFolderName);
+                    }
+                    this.FillListFiles();
+                }
+            }
+            else
+            {
+                FileOrFolderInformation f = this.currentFolderContents.Contents.Find(x => x.Name == itemName);
+                if(f.IsFolder)
+                {
+                    // check if selected item is file, then ignore
+                    // if directory then enter, append name to currentFoldername after //
+                    // relist directory
+                    if (this.currentFolderName == null)
+                    {
+                        this.currentFolderName = itemName;
+                        // Console.WriteLine(currentFolderName);
+                    }
+                    else
+                    {
+                        this.currentFolderName += "//" + itemName;
+                        //Console.WriteLine(currentFolderName);
+                    }
+                    this.FillListFiles();
+                }
+                else
+                {
+                    // download
+                }
+            }
+        }
+
+        async private void DeleteFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (this.FileList.SelectedIndex < 0)
+                return;
+            string itemName = this.FileList.SelectedItem.ToString();
+            FileOrFolderInformation f = this.currentFolderContents.Contents.Find(x => x.Name == itemName);
+            if (f.IsFolder)
+            {
+                System.Windows.MessageBox.Show(String.Format("Cannot delete directory {0}!", this.FileList.SelectedItem.ToString()));
+            }
+            else
+            {
+                await this.portal.DeleteFileAsync(
+                        "LocalAppData",
+                        f.Name,
+                        this.currentFolderName,
+                        this.CurrentPackageFullName
+                    );
+                this.FillListFiles();
+            }
+        }
+        async private void UploadFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (this.currentFolderContents == null)
+                return;
+
+            var filepath = string.Empty;
+
+            using (OpenFileDialog openFileDialog = new OpenFileDialog())
+            {
+                openFileDialog.InitialDirectory = System.IO.Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath).ToString();
+                openFileDialog.Filter = "All files (*.*)|*.*";
+                openFileDialog.FilterIndex = 1;
+                openFileDialog.RestoreDirectory = true;
+
+                if (openFileDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+                {
+                    //Get the path of specified file
+                    filepath = openFileDialog.FileName;
+                    // Console.WriteLine(filepath);
+                    await this.portal.UploadFileAsync(
+                        "LocalAppData",
+                        filepath,
+                        this.currentFolderName,
+                        this.CurrentPackageFullName);
+                    this.FillListFiles();
+                }
+            }
+        }
+
+        async private void DownloadFile_Click(object sender, RoutedEventArgs e)
+        {
+            if (this.FileList.SelectedIndex < 0)
+                return;
+            string itemName = this.FileList.SelectedItem.ToString();
+            FileOrFolderInformation f = this.currentFolderContents.Contents.Find(x => x.Name == itemName);
+            if (f.IsFolder)
+            {
+                System.Windows.MessageBox.Show(String.Format("Cannot delete directory {0}!", this.FileList.SelectedItem.ToString()));
+            }
+            else
+            {
+                using (SaveFileDialog saveFileDialog = new SaveFileDialog())
+                {
+                    saveFileDialog.InitialDirectory = System.IO.Path.GetDirectoryName(System.Windows.Forms.Application.ExecutablePath).ToString();
+                    saveFileDialog.RestoreDirectory = true;
+                    saveFileDialog.FileName = f.Name;
+
+                    if ((saveFileDialog.ShowDialog() == System.Windows.Forms.DialogResult.OK) && (saveFileDialog.FileName != ""))
+                    {
+                        System.IO.Stream data = await this.portal.GetFileAsync(
+                            "LocalAppData",
+                            f.Name,
+                            this.currentFolderName,
+                            this.CurrentPackageFullName
+                        );
+                        using (var fileStream = System.IO.File.Create(saveFileDialog.FileName))
+                        {
+                            data.Seek(0, System.IO.SeekOrigin.Begin);
+                            data.CopyTo(fileStream);
+                        }
+
+                    }
+                }
+            }
         }
     }
 }
